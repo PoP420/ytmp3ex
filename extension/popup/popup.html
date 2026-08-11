@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ytmp3ex</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>ytmp3ex</h1>
+    <div id="status" class="status">Detecting video...</div>
+    <div class="form-group">
+      <input type="text" id="url" placeholder="YouTube URL" />
+      <button id="convertBtn">Convert to MP3</button>
+    </div>
+    <div id="result" class="result hidden">
+      <div id="info"></div>
+    </div>
+    <div class="footer">
+      <a id="settingsLink" href="#" target="_blank">Settings</a>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

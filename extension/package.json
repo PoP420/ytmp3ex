@@ -1,0 +1,9 @@
+{
+  "name": "ytmp3ex-extension",
+  "version": "0.1.0",
+  "description": "YouTube to MP3 browser extension",
+  "scripts": {
+    "lint": "echo 'Add eslint/prettier here if needed'",
+    "build": "python ../build/build.py"
+  }
+}

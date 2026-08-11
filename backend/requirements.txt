@@ -1,0 +1,5 @@
+fastapi>=0.111
+uvicorn[standard]>=0.30
+yt-dlp>=2024.4
+pydantic>=2.7
+python-multipart>=0.0.9

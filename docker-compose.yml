@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - downloads:/app/downloads
+    environment:
+      - DOWNLOAD_DIR=/app/downloads
+
+volumes:
+  downloads:
