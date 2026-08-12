@@ -6,9 +6,13 @@ YouTube to MP3 browser extension with a local Python backend. Works in Microsoft
 
 - Convert YouTube videos to MP3 from the extension popup
 - Injected **Download** button directly on YouTube video pages
+- **Persistent conversions**: closing the popup or switching tabs no longer cancels downloads
+- **Queue & history**: track multiple conversions and retry failed ones
+- **Progress tracking**: real-time download/convert progress in the popup
+- **Desktop notifications**: get notified when conversion completes
+- **Configurable quality**: choose MP3 bitrate from Settings
 - Local backend using `yt-dlp` + `ffmpeg` for reliable conversion
 - Docker support for easy backend deployment
-- Configurable backend URL and audio quality
 
 ## Architecture
 
@@ -17,7 +21,7 @@ ytmp3ex/
 ├── backend/                # Python local server (FastAPI + yt-dlp + ffmpeg)
 │   ├── app/
 │   │   ├── routes/
-│   │   │   └── download.py     # /api/convert, /api/download/{id}
+│   │   │   └── download.py     # /api/convert, /api/convert/async, /api/jobs/{id}, /api/download/{id}
 │   │   ├── services/
 │   │   │   └── yt_downloader.py # yt-dlp + FFmpegExtractAudio logic
 │   │   └── models/
@@ -27,14 +31,14 @@ ytmp3ex/
 │   └── pyproject.toml
 ├── extension/                  # Manifest V3 browser extension
 │   ├── manifest.json
-│   ├── popup/                  # Extension popup UI
+│   ├── popup/                  # Extension popup UI (Queue / History / Convert)
 │   │   ├── popup.html
 │   │   ├── popup.css
 │   │   └── popup.js
+│   ├── background/
+│   │   └── service-worker.js   # Persistent conversion manager + alarms + notifications
 │   ├── content/                # YouTube page injection
 │   │   └── content.js
-│   ├── background/
-│   │   └── service-worker.js
 │   └── options/                # Settings page
 │       ├── options.html
 │       └── options.js
@@ -42,6 +46,16 @@ ytmp3ex/
 ├── tests/                      # Shared tests
 └── dist/                       # Build artifacts
 ```
+
+## How it works
+
+1. Extension sends conversion request to backend via `/api/convert/async`
+2. Backend starts conversion in a background thread and returns a `job_id`
+3. Service worker polls `/api/jobs/{job_id}` using Chrome Alarms
+4. When complete, service worker triggers Edge download and shows a desktop notification
+5. Popup shows live progress, queue, and conversion history
+
+This means you can close the popup, switch tabs, or even close Edge — the service worker keeps running and finishes the job.
 
 ## Prerequisites
 
@@ -82,10 +96,11 @@ curl http://localhost:8000/health
 
 ### From the Popup
 
-1. Open any YouTube video
+1. Open any YouTube video (or paste any URL)
 2. Click the ytmp3ex icon in the Edge toolbar
-3. Click **Convert to MP3**
-4. The MP3 downloads automatically via Edge's download manager
+3. Paste a YouTube URL and click **Convert**
+4. Watch progress in the **Queue** tab
+5. The MP3 downloads automatically via Edge's download manager when done
 
 ### From YouTube Page
 
@@ -106,83 +121,68 @@ Open the extension **Settings** to configure:
 
 ## Backend API
 
-The backend runs on `http://localhost:8000` and exposes two endpoints:
+The backend runs on `http://localhost:8000` and exposes:
 
 ### POST /api/convert
 
-Converts a YouTube video to MP3.
+Synchronous conversion (blocks until done).
 
 **Request:**
 ```json
 {
-  "url": "https://www.youtube.com/watch?v=VIDEO_ID"
+  "url": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "quality": "192"
+}
+```
+
+### POST /api/convert/async
+
+Starts conversion in background and returns immediately.
+
+**Request:**
+```json
+{
+  "url": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "quality": "192"
 }
 ```
 
 **Response:**
 ```json
 {
-  "id": "VIDEO_ID",
-  "title": "Video Title",
-  "duration": 180,
-  "thumbnail": "https://...",
-  "uploader": "Channel Name",
-  "file_path": "/app/downloads/VIDEO_ID.mp3"
+  "job_id": "uuid",
+  "status": "queued"
 }
 ```
 
-### GET /api/download/{video_id}
+### GET /api/jobs/{job_id}
+
+Returns current job status and progress.
+
+### GET /api/download/{job_id}
 
 Downloads the converted MP3 file.
-
-```bash
-curl -L http://localhost:8000/api/download/VIDEO_ID -o output.mp3
-```
 
 ### GET /health
 
 Health check endpoint.
 
-## Backend API Flow
+## Improvements for large files and long music
 
-```
-Browser Extension          Backend (FastAPI)
-      |                           |
-      |--- POST /api/convert --->|
-      |                           |-- yt-dlp extracts info & downloads audio
-      |                           |-- ffmpeg converts to MP3
-      |<-- JSON with video info --|
-      |                           |
-      |--- GET /api/download/:id ->|
-      |<-- MP3 file -------------|
-      |                           |
-```
-
-## Manual Backend Setup (Without Docker)
-
-If you prefer running the backend directly:
-
-```bash
-# Create virtual environment
-python -m venv .venv
-.\.venv\Scripts\activate
-
-# Install dependencies
-pip install -r backend/requirements.txt
-
-# Run the server
-python backend/main.py
-```
+- yt-dlp is configured with `bestaudio/best`, `nocheckcertificate`, and progress hooks for reliable long-running downloads
+- Backend runs conversions in daemon threads with extended timeout (10 minutes)
+- Frontend uses polling via Chrome Alarms so the service worker stays alive between checks
+- Popup shows real-time download/convert progress so you can track long conversions
 
 ## Troubleshooting
 
-### "Couldn't download" in Edge
+### Backend unreachable
 
 - Ensure the backend is running: `curl http://localhost:8000/health`
-- Ensure the extension has the `downloads` permission (included in manifest)
-- Reload the extension after making changes
+- Check the backend URL in Settings matches your backend
+- If using Docker, ensure port 8000 is not in use
 
-### "Failed to convert"
+### Conversion failed
 
 - Check backend logs: `docker logs ytmp3ex-backend-1`
 - Ensure `ffmpeg` is installed (included in Docker image)

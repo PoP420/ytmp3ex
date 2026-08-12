@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "ytmp3ex",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Download YouTube videos as MP3",
-  "permissions": ["activeTab", "storage", "scripting", "downloads"],
-  "host_permissions": ["https://www.youtube.com/*", "http://localhost:*/*"],
+  "permissions": ["activeTab", "storage", "scripting", "downloads", "notifications", "alarms"],
+  "host_permissions": ["https://www.youtube.com/*", "http://localhost:*/*", "http://127.0.0.1:*/*"],
   "action": {
     "default_popup": "popup/popup.html"
   },

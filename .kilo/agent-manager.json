@@ -4,12 +4,17 @@
     "ses_011e19b73ffeMnfGMkY4gTuDUe": {
       "worktreeId": null,
       "createdAt": "2026-08-10T23:59:57.111Z"
+    },
+    "ses_00b83efaaffeQ9BAC0YWUkplzi": {
+      "worktreeId": null,
+      "createdAt": "2026-08-12T05:39:59.303Z"
     }
   },
   "tabOrder": {
     "local": [
       "ses_011e19b73ffeMnfGMkY4gTuDUe",
-      "pending:afdb89be-bad0-4bbb-b35b-eed6e76a69d4"
+      "pending:afdb89be-bad0-4bbb-b35b-eed6e76a69d4",
+      "ses_00b83efaaffeQ9BAC0YWUkplzi"
     ]
   },
   "sessionsCollapsed": true

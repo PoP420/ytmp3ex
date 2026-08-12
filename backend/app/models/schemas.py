@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 
 class ConvertRequest(BaseModel):
     url: str = Field(..., min_length=10)
+    quality: str | None = None
 
 
 class VideoInfo(BaseModel):

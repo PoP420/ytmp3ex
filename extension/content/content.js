@@ -17,15 +17,16 @@ function getVideoUrl() {
   return id ? `https://www.youtube.com/watch?v=${id}` : window.location.href;
 }
 
-async function convertToMp3(url) {
-  const settings = await getSettings();
-  const res = await fetch(`${settings.backend}/api/convert`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url })
+async function swMessage(msg) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(msg, (res) => resolve(res));
   });
-  if (!res.ok) throw new Error('Conversion failed');
-  return res.json();
+}
+
+async function convertToMp3(url) {
+  const res = await swMessage({ type: 'CONVERT', url });
+  if (!res || !res.ok) throw new Error(res?.error || 'Conversion failed');
+  return res.jobId;
 }
 
 function injectButton() {
@@ -46,13 +47,7 @@ function injectButton() {
     btn.disabled = true;
     btn.textContent = '...';
     try {
-      const data = await convertToMp3(getVideoUrl());
-      const settings = await getSettings();
-      chrome.downloads.download({
-        url: `${settings.backend}/api/download/${data.id}`,
-        filename,
-        saveAs: false
-      });
+      await convertToMp3(getVideoUrl());
       btn.textContent = '✓';
     } catch (e) {
       btn.textContent = '!';

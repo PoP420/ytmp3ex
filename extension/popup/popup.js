@@ -1,11 +1,15 @@
 const urlInput = document.getElementById('url');
 const convertBtn = document.getElementById('convertBtn');
 const statusEl = document.getElementById('status');
-const resultEl = document.getElementById('result');
-const infoEl = document.getElementById('info');
+const progressEl = document.getElementById('currentProgress');
+const progressFill = document.getElementById('progressFill');
+const progressText = document.getElementById('progressText');
+const queueList = document.getElementById('queueList');
+const historyList = document.getElementById('historyList');
 const settingsLink = document.getElementById('settingsLink');
+const backendStatus = document.getElementById('backendStatus');
 
-const BACKEND = 'http://localhost:8000';
+settingsLink.href = chrome.runtime.getURL('options/options.html');
 
 function cleanUrl(url) {
   try {
@@ -16,52 +20,137 @@ function cleanUrl(url) {
   return url;
 }
 
-function getSettings() {
+async function swMessage(msg) {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['settings'], (result) => {
-      resolve(result.settings || { backend: 'http://localhost:8000' });
+    chrome.runtime.sendMessage(msg, (res) => resolve(res));
+  });
+}
+
+async function checkBackend() {
+  try {
+    const settings = await swMessage({ type: 'GET_SETTINGS' });
+    const res = await fetch(`${settings.backend}/health`);
+    backendStatus.classList.add(res.ok ? 'ok' : 'err');
+    backendStatus.title = res.ok ? 'Backend connected' : 'Backend unreachable';
+  } catch {
+    backendStatus.classList.add('err');
+    backendStatus.title = 'Backend unreachable';
+  }
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-content').forEach((c) => c.classList.toggle('active', c.id === `tab-${name}`));
+}
+
+document.querySelectorAll('.tab').forEach((tab) => {
+  tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+});
+
+function formatDuration(seconds) {
+  if (!seconds) return '--';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderBadge(status) {
+  const map = {
+    queued: '<span class="badge badge-queued">Queued</span>',
+    processing: '<span class="badge badge-processing">Processing</span>',
+    completed: '<span class="badge badge-completed">Done</span>',
+    failed: '<span class="badge badge-failed">Failed</span>',
+  };
+  return map[status] || status;
+}
+
+async function refreshData() {
+  const data = await swMessage({ type: 'GET_QUEUE' });
+  renderQueue(data.queue || []);
+  renderHistory(data.history || []);
+}
+
+function renderQueue(items) {
+  if (!items.length) {
+    queueList.innerHTML = '<div class="empty">No active conversions</div>';
+    return;
+  }
+  queueList.innerHTML = items
+    .map((item) => {
+      const isActive = item.status === 'queued' || item.status === 'processing';
+      return `
+        <div class="item">
+          <div class="item-title" title="${item.url}">${item.title || item.url}</div>
+          <div class="item-meta">
+            ${renderBadge(item.status)}
+            <span>${item.message || ''}</span>
+          </div>
+          ${isActive ? `
+          <div class="progress" style="margin-top:6px;">
+            <div class="progress-bar"><div class="progress-fill" style="width:${item.progress || 0}%"></div></div>
+            <div class="progress-text">${item.progress || 0}%</div>
+          </div>` : ''}
+          <div class="item-actions">
+            ${item.status === 'failed' ? `<button class="btn-xs btn-primary" data-action="retry" data-jid="${item.jobId}">Retry</button>` : ''}
+            <button class="btn-xs btn-ghost" data-action="remove" data-jid="${item.jobId}">Remove</button>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+
+  queueList.querySelectorAll('button[data-action="retry"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const res = await swMessage({ type: 'RETRY_JOB', jobId: btn.dataset.jid });
+      if (res.ok) refreshData();
+    });
+  });
+  queueList.querySelectorAll('button[data-action="remove"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await swMessage({ type: 'REMOVE_JOB', jobId: btn.dataset.jid });
+      refreshData();
     });
   });
 }
 
-settingsLink.href = chrome.runtime.getURL('options/options.html');
-
-async function detectVideo() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab || !tab.url || !tab.url.includes('youtube.com') && !tab.url.includes('youtu.be')) {
-    statusEl.textContent = 'Not on YouTube';
-    urlInput.value = tab?.url || '';
+function renderHistory(items) {
+  if (!items.length) {
+    historyList.innerHTML = '<div class="empty">No history yet</div>';
     return;
   }
-  statusEl.textContent = 'YouTube detected';
-  urlInput.value = tab.url;
+  historyList.innerHTML = items
+    .map((item) => `
+      <div class="item">
+        <div class="item-title" title="${item.url}">${item.title || item.url}</div>
+        <div class="item-meta">
+          ${renderBadge(item.status)}
+          <span>${formatDuration(item.duration)} · ${formatTime(item.addedAt)}</span>
+        </div>
+      </div>
+    `)
+    .join('');
 }
 
 async function convert() {
-  const url = urlInput.value.trim();
+  const url = cleanUrl(urlInput.value.trim());
   if (!url) return;
   convertBtn.disabled = true;
-  statusEl.textContent = 'Converting...';
-  resultEl.classList.add('hidden');
+  statusEl.textContent = 'Starting...';
+  progressEl.classList.add('hidden');
   try {
-    const res = await fetch(`${BACKEND}/api/convert`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: cleanUrl(url) })
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || 'Conversion failed');
-    }
-    const data = await res.json();
-    chrome.downloads.download({
-      url: `${BACKEND}/api/download/${data.id}`,
-      filename: `${data.title || data.id}.mp3`,
-      saveAs: false
-    });
-    infoEl.textContent = `${data.title} (${data.duration || '?'}s)`;
-    resultEl.classList.remove('hidden');
-    statusEl.textContent = 'Done';
+    const res = await swMessage({ type: 'CONVERT', url });
+    if (!res || !res.ok) throw new Error(res?.error || 'Conversion failed');
+    statusEl.textContent = 'Converting...';
+    progressEl.classList.remove('hidden');
+    urlInput.value = '';
+    refreshData();
+    switchTab('queue');
   } catch (e) {
     statusEl.textContent = 'Error: ' + e.message;
   } finally {
@@ -74,4 +163,19 @@ urlInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') convert();
 });
 
-detectVideo();
+(async () => {
+  await checkBackend();
+  await refreshData();
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.url && (tab.url.includes('youtube.com') || tab.url.includes('youtu.be'))) {
+    urlInput.value = tab.url;
+  }
+})();
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'QUEUE_UPDATED') {
+    refreshData();
+  }
+});
+
+setInterval(checkBackend, 30000);
