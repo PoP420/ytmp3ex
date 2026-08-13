@@ -12,8 +12,12 @@ const backendStatus = document.getElementById('backendStatus');
 settingsLink.href = chrome.runtime.getURL('options/options.html');
 
 function cleanUrl(url) {
+  if (!url) return null;
   try {
     const u = new URL(url);
+    if (u.pathname === '/results' && u.searchParams.has('search_query')) {
+      return null;
+    }
     const id = u.searchParams.get('v');
     if (id) return `https://www.youtube.com/watch?v=${id}`;
   } catch {}
@@ -29,7 +33,8 @@ async function swMessage(msg) {
 async function checkBackend() {
   try {
     const settings = await swMessage({ type: 'GET_SETTINGS' });
-    const res = await fetch(`${settings.backend}/health`);
+    const backend = (settings.backend || 'http://localhost:8000').replace(/\/+$/, '');
+    const res = await fetch(`${backend}/health`);
     backendStatus.classList.add(res.ok ? 'ok' : 'err');
     backendStatus.title = res.ok ? 'Backend connected' : 'Backend unreachable';
   } catch {
@@ -139,7 +144,10 @@ function renderHistory(items) {
 
 async function convert() {
   const url = cleanUrl(urlInput.value.trim());
-  if (!url) return;
+  if (!url) {
+    statusEl.textContent = 'Error: Open a specific YouTube video to convert';
+    return;
+  }
   convertBtn.disabled = true;
   statusEl.textContent = 'Starting...';
   progressEl.classList.add('hidden');
@@ -165,6 +173,7 @@ urlInput.addEventListener('keydown', (e) => {
 
 (async () => {
   await checkBackend();
+  await swMessage({ type: 'SYNC_QUEUE' });
   await refreshData();
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.url && (tab.url.includes('youtube.com') || tab.url.includes('youtu.be'))) {

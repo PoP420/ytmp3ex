@@ -11,7 +11,7 @@ async function getSettings() {
 
 async function getBackend() {
   const s = await getSettings();
-  return s.backend || 'http://localhost:8000';
+  return (s.backend || 'http://localhost:8000').replace(/\/+$/, '');
 }
 
 async function queue() {
@@ -55,11 +55,18 @@ function notify(title, message) {
 async function pollJob(jobId) {
   try {
     const backend = await getBackend();
-    const res = await fetch(`${backend}/jobs/${jobId}`);
-    if (!res.ok) return null;
+    const res = await fetch(`${backend}/api/jobs/${jobId}`);
+    if (!res.ok) {
+      const status = res.status;
+      let message = 'Unknown error';
+      if (status === 404) message = 'Job not found';
+      else if (status === 500) message = 'Server error';
+      else message = `HTTP ${status}`;
+      return { status: 'error', message, code: status };
+    }
     return await res.json();
-  } catch {
-    return null;
+  } catch (e) {
+    return { status: 'error', message: e.message || 'Network error', code: null };
   }
 }
 
@@ -69,12 +76,19 @@ async function processQueue() {
   if (!activeIds.length) return;
 
   for (const jobId of activeIds) {
-    const job = await pollJob(jobId);
-    if (!job) continue;
-
     const current = await queue();
     const idx = current.findIndex((j) => j.jobId === jobId);
     if (idx === -1) continue;
+
+    const job = await pollJob(jobId);
+    if (!job || job.status === 'error') {
+      if (job && job.status === 'error') {
+        current[idx].status = 'failed';
+        current[idx].message = job.message || 'Failed';
+        await setQueue(current);
+      }
+      continue;
+    }
 
     if (job.status === 'completed') {
       current[idx].status = 'completed';
@@ -89,7 +103,7 @@ async function processQueue() {
       const backend = await getBackend();
       try {
         chrome.downloads.download({
-          url: `${backend}/download/${job.id}`,
+          url: `${backend}/api/download/${job.id}`,
           filename: `${job.title || job.id}.mp3`,
           saveAs: false,
         });
@@ -120,6 +134,12 @@ async function processQueue() {
     }
   }
 
+  const updated = await queue();
+  const filtered = updated.filter((j) => j.status === 'queued' || j.status === 'processing');
+  if (filtered.length !== updated.length) {
+    await setQueue(filtered);
+  }
+
   chrome.runtime.sendMessage({ type: 'QUEUE_UPDATED' }).catch(() => {});
 }
 
@@ -148,7 +168,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         const settings = await getSettings();
         const backend = settings.backend || 'http://localhost:8000';
-        const res = await fetch(`${backend}/convert/async`, {
+          const res = await fetch(`${backend}/api/convert/async`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: msg.url, quality: settings.quality || '192' }),
@@ -170,20 +190,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await setQueue(q);
         startPolling();
         chrome.runtime.sendMessage({ type: 'QUEUE_UPDATED' }).catch(() => {});
-        sendResponse({ ok: true, jobId: data.job_id });
+        return { ok: true, jobId: data.job_id };
       } catch (e) {
-        sendResponse({ ok: false, error: e.message });
+        return { ok: false, error: e.message };
       }
     } else if (msg.type === 'GET_QUEUE') {
       const q = await queue();
       const h = await history();
-      sendResponse({ queue: q, history: h.slice(0, 20) });
+      return { queue: q, history: h.slice(0, 20) };
+    } else if (msg.type === 'SYNC_QUEUE') {
+      await processQueue();
+      return { ok: true };
     } else if (msg.type === 'GET_SETTINGS') {
       const s = await getSettings();
-      sendResponse(s);
+      return s;
     } else if (msg.type === 'SETTINGS_UPDATED') {
-      chrome.storage.local.set({ settings: msg.settings });
-      sendResponse({ ok: true });
+      await chrome.storage.local.set({ settings: msg.settings });
+      return { ok: true };
     } else if (msg.type === 'RETRY_JOB') {
       const q = await queue();
       const job = q.find((j) => j.jobId === msg.jobId);
@@ -195,7 +218,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         try {
           const settings = await getSettings();
           const backend = settings.backend || 'http://localhost:8000';
-          const res = await fetch(`${backend}/convert/async`, {
+          const res = await fetch(`${backend}/api/convert/async`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url: job.url, quality: settings.quality || '192' }),
@@ -205,22 +228,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           job.jobId = data.job_id;
           await setQueue(q);
           startPolling();
-          sendResponse({ ok: true });
+          return { ok: true };
         } catch (e) {
           job.status = 'failed';
           job.message = e.message;
           await setQueue(q);
-          sendResponse({ ok: false, error: e.message });
+          return { ok: false, error: e.message };
         }
       } else {
-        sendResponse({ ok: false, error: 'Job not found or not failed' });
+        return { ok: false, error: 'Job not found or not failed' };
       }
     } else if (msg.type === 'REMOVE_JOB') {
       const q = await queue();
       const filtered = q.filter((j) => j.jobId !== msg.jobId);
       await setQueue(filtered);
-      sendResponse({ ok: true });
+      return { ok: true };
     }
+    return {};
   })().then(
     (res) => sendResponse(res),
     (err) => sendResponse({ ok: false, error: err.message })

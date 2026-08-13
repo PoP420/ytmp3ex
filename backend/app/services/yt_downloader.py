@@ -8,7 +8,7 @@ DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def get_video_info(url: str) -> dict:
-    ydl_opts = {"quiet": True, "no_warnings": True}
+    ydl_opts = {"quiet": True, "no_warnings": True, "socket_timeout": 30}
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
     return {
@@ -27,6 +27,7 @@ def download_audio(url: str, output_template: Optional[str] = None) -> str:
         "outtmpl": out,
         "quiet": True,
         "no_warnings": True,
+        "socket_timeout": 30,
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",

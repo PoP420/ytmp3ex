@@ -58,6 +58,7 @@ def _run_conversion(job_id: str, url: str, quality: str):
             "ignoreerrors": False,
             "no_warnings": True,
             "progress_hooks": [progress_hook],
+            "socket_timeout": 30,
         }
 
         with YoutubeDL(ydl_opts) as ydl:
@@ -83,7 +84,12 @@ def _run_conversion(job_id: str, url: str, quality: str):
             file_path=mp3_path,
         )
     except Exception as exc:
-        _update_job(job_id, status="failed", message=f"Error: {exc}")
+        message = str(exc)
+        if "This video is not available" in message:
+            message = "Video is unavailable or restricted"
+        elif "Not Found" in message:
+            message = "Video not found. The URL may be invalid or the video was removed."
+        _update_job(job_id, status="failed", message=f"Error: {message}")
 
 
 @router.post("/convert", response_model=VideoInfo)
